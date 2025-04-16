@@ -21,12 +21,38 @@ class BirdSynth {
         this.tapeEnabled = false;
         this.tapeSpeed = 1;
         this.tapeDirection = 1;
+
+        this.pattern = [];
+        this.isRecordingPattern = false;
+        this.patternStartTime = 0;
+        this.isPlayingPattern = false;
+        
+        this.soundTypes = {
+            bird: {
+                chirp: { baseFreq: 800, modFreq: 10, modDepth: 50 },
+                whistle: { baseFreq: 1200, modFreq: 5, modDepth: 30 },
+                trill: { baseFreq: 1000, modFreq: 20, modDepth: 70 },
+                tweet: { baseFreq: 1500, modFreq: 15, modDepth: 40 },
+                warble: { baseFreq: 900, modFreq: 8, modDepth: 60 },
+                peep: { baseFreq: 2000, modFreq: 12, modDepth: 35 },
+                coo: { baseFreq: 600, modFreq: 3, modDepth: 25 },
+                squawk: { baseFreq: 700, modFreq: 25, modDepth: 80 }
+            },
+            bass: {
+                bass: { baseFreq: 100, modFreq: 2, modDepth: 20, type: 'sawtooth' },
+                heavyBass: { baseFreq: 80, modFreq: 1, modDepth: 30, type: 'sawtooth' },
+                subBass: { baseFreq: 60, modFreq: 0.5, modDepth: 40, type: 'sawtooth' },
+                growl: { baseFreq: 120, modFreq: 4, modDepth: 50, type: 'sawtooth' }
+            }
+        };
         
         this.setupCanvas();
         this.setupControls();
         this.setupAudioNodes();
         this.setupRecordingControls();
         this.setupEffects();
+        this.setupBeatPad();
+        this.setupKeyboardControls();
     }
 
     setupCanvas() {
@@ -503,18 +529,37 @@ class BirdSynth {
     }
 
     playSound(type) {
-        const frequency = parseFloat(this.sliders.frequency.value);
-        const modulation = parseFloat(this.sliders.modulation.value);
+        const category = type.includes('bass') ? 'bass' : 'bird';
+        const soundConfig = this.soundTypes[category][type];
+        
+        if (!soundConfig) return;
+
+        const frequency = soundConfig.baseFreq;
+        const modulation = soundConfig.modDepth;
         const attack = parseFloat(this.sliders.attack.value);
         const release = parseFloat(this.sliders.release.value);
-        const modulationFrequency = this.getModulationFrequency(type);
+        const modulationFrequency = soundConfig.modFreq;
 
         const { oscillator, modulator, gainNode, modGain } = this.createOscillator();
+
+        // Set oscillator type based on sound configuration
+        oscillator.type = soundConfig.type || 'sine';
+        modulator.type = 'sine';
 
         const time = this.audioContext.currentTime;
         oscillator.frequency.setValueAtTime(frequency, time);
         modulator.frequency.setValueAtTime(modulationFrequency, time);
         modGain.gain.setValueAtTime(modulation, time);
+
+        // Add a lowpass filter for bass sounds
+        if (category === 'bass') {
+            const filter = this.audioContext.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = 200;
+            oscillator.disconnect();
+            oscillator.connect(filter);
+            filter.connect(gainNode);
+        }
 
         gainNode.gain.setValueAtTime(0, time);
         gainNode.gain.linearRampToValueAtTime(1, time + attack);
@@ -531,7 +576,9 @@ class BirdSynth {
                 modulation,
                 modulationFrequency,
                 attack,
-                release
+                release,
+                type: type,
+                category: category
             });
         }
 
@@ -602,6 +649,170 @@ class BirdSynth {
         };
 
         draw();
+    }
+
+    setupBeatPad() {
+        const beatPad = document.getElementById('beatPad');
+        const padConfig = [
+            // Bird sounds
+            { key: 'q', sound: 'chirp', category: 'bird', label: 'Q' },
+            { key: 'w', sound: 'whistle', category: 'bird', label: 'W' },
+            { key: 'e', sound: 'trill', category: 'bird', label: 'E' },
+            { key: 'r', sound: 'tweet', category: 'bird', label: 'R' },
+            { key: 'a', sound: 'warble', category: 'bird', label: 'A' },
+            { key: 's', sound: 'peep', category: 'bird', label: 'S' },
+            { key: 'd', sound: 'coo', category: 'bird', label: 'D' },
+            { key: 'f', sound: 'squawk', category: 'bird', label: 'F' },
+            // Bass sounds
+            { key: 'z', sound: 'bass', category: 'bass', label: 'Z' },
+            { key: 'x', sound: 'heavyBass', category: 'bass', label: 'X' },
+            { key: 'c', sound: 'subBass', category: 'bass', label: 'C' },
+            { key: 'v', sound: 'growl', category: 'bass', label: 'V' }
+        ];
+
+        padConfig.forEach((config, index) => {
+            const pad = document.createElement('div');
+            pad.className = `pad ${config.category}`;
+            pad.dataset.key = config.key;
+            pad.dataset.sound = config.sound;
+            pad.dataset.category = config.category;
+
+            const soundLabel = document.createElement('div');
+            soundLabel.className = 'pad-sound';
+            soundLabel.textContent = config.sound;
+
+            const keyLabel = document.createElement('div');
+            keyLabel.className = 'pad-label';
+            keyLabel.textContent = config.label;
+
+            pad.appendChild(soundLabel);
+            pad.appendChild(keyLabel);
+
+            pad.addEventListener('mousedown', () => this.triggerPad(pad));
+            pad.addEventListener('mouseup', () => this.releasePad(pad));
+            pad.addEventListener('mouseleave', () => this.releasePad(pad));
+
+            beatPad.appendChild(pad);
+        });
+
+        // Setup pattern controls
+        const recordPattern = document.getElementById('recordPattern');
+        const playPattern = document.getElementById('playPattern');
+        const clearPattern = document.getElementById('clearPattern');
+
+        recordPattern.addEventListener('click', () => this.togglePatternRecording());
+        playPattern.addEventListener('click', () => this.togglePatternPlayback());
+        clearPattern.addEventListener('click', () => this.clearPattern());
+    }
+
+    setupKeyboardControls() {
+        document.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            const pad = document.querySelector(`.pad[data-key="${key}"]`);
+            if (pad) {
+                this.triggerPad(pad);
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            const pad = document.querySelector(`.pad[data-key="${key}"]`);
+            if (pad) {
+                this.releasePad(pad);
+            }
+        });
+    }
+
+    triggerPad(pad) {
+        if (!pad.classList.contains('active')) {
+            pad.classList.add('active');
+            const sound = pad.dataset.sound;
+            this.playSound(sound);
+
+            if (this.isRecordingPattern) {
+                const time = this.audioContext.currentTime - this.patternStartTime;
+                this.pattern.push({
+                    time,
+                    sound,
+                    duration: 0.2 // Default duration
+                });
+            }
+        }
+    }
+
+    releasePad(pad) {
+        pad.classList.remove('active');
+    }
+
+    togglePatternRecording() {
+        const recordButton = document.getElementById('recordPattern');
+        if (this.isRecordingPattern) {
+            this.isRecordingPattern = false;
+            recordButton.classList.remove('active');
+            recordButton.textContent = 'Record Pattern';
+        } else {
+            this.isRecordingPattern = true;
+            this.pattern = [];
+            this.patternStartTime = this.audioContext.currentTime;
+            recordButton.classList.add('active');
+            recordButton.textContent = 'Stop Recording';
+        }
+    }
+
+    togglePatternPlayback() {
+        const playButton = document.getElementById('playPattern');
+        if (this.isPlayingPattern) {
+            this.stopPatternPlayback();
+            playButton.classList.remove('active');
+            playButton.textContent = 'Play Pattern';
+        } else {
+            this.playPattern();
+            playButton.classList.add('active');
+            playButton.textContent = 'Stop Pattern';
+        }
+    }
+
+    playPattern() {
+        if (this.pattern.length === 0 || this.isPlayingPattern) return;
+        
+        this.isPlayingPattern = true;
+        const startTime = this.audioContext.currentTime;
+        
+        this.pattern.forEach(event => {
+            const time = startTime + event.time;
+            setTimeout(() => {
+                const pad = document.querySelector(`.pad[data-sound="${event.sound}"]`);
+                if (pad) {
+                    this.triggerPad(pad);
+                    setTimeout(() => this.releasePad(pad), event.duration * 1000);
+                }
+            }, event.time * 1000);
+        });
+
+        const totalDuration = this.pattern[this.pattern.length - 1].time + this.pattern[this.pattern.length - 1].duration;
+        setTimeout(() => {
+            this.stopPatternPlayback();
+        }, totalDuration * 1000);
+    }
+
+    stopPatternPlayback() {
+        this.isPlayingPattern = false;
+        const playButton = document.getElementById('playPattern');
+        playButton.classList.remove('active');
+        playButton.textContent = 'Play Pattern';
+        
+        // Release all pads
+        document.querySelectorAll('.pad.active').forEach(pad => {
+            this.releasePad(pad);
+        });
+    }
+
+    clearPattern() {
+        this.pattern = [];
+        this.stopPatternPlayback();
+        const recordButton = document.getElementById('recordPattern');
+        recordButton.classList.remove('active');
+        recordButton.textContent = 'Record Pattern';
     }
 }
 

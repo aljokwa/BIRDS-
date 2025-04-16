@@ -281,6 +281,98 @@
         .tape-controls button.active {
             background: #6c3483;
         }
+
+        .beat-pad {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin: 20px 0;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+        }
+
+        .pad {
+            aspect-ratio: 1;
+            background: #2c3e50;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.1s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .pad.bass {
+            background: #8e44ad;
+        }
+
+        .pad.bass.active {
+            background: #9b59b6;
+        }
+
+        .pad.bird {
+            background: #27ae60;
+        }
+
+        .pad.bird.active {
+            background: #2ecc71;
+        }
+
+        .pad-sound {
+            font-size: 14px;
+            color: white;
+            text-align: center;
+            padding: 5px;
+        }
+
+        .pad-label {
+            position: absolute;
+            bottom: 5px;
+            right: 5px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .sound-category {
+            grid-column: 1 / -1;
+            text-align: center;
+            color: #2ecc71;
+            font-size: 16px;
+            margin: 10px 0;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .keyboard-hint {
+            text-align: center;
+            margin-top: 10px;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .pattern-controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 10px;
+        }
+
+        .pattern-controls button {
+            padding: 8px 15px;
+            font-size: 14px;
+            background: #8e44ad;
+        }
+
+        .pattern-controls button:hover {
+            background: #9b59b6;
+        }
+
+        .pattern-controls button.active {
+            background: #6c3483;
+        }
     </style>
 </head>
 <body>
@@ -288,6 +380,23 @@
         <h1>Bird Synth</h1>
         <canvas id="visualizer" class="visualizer"></canvas>
         
+        <div class="beat-pad" id="beatPad">
+            <div class="sound-category">Bird Sounds</div>
+            <!-- Bird sound pads will be added here -->
+            <div class="sound-category">Bass Sounds</div>
+            <!-- Bass sound pads will be added here -->
+        </div>
+
+        <div class="keyboard-hint">
+            Use keys Q, W, E, R for row 1, A, S, D, F for row 2, Z, X, C, V for row 3
+        </div>
+
+        <div class="pattern-controls">
+            <button id="recordPattern">Record Pattern</button>
+            <button id="playPattern">Play Pattern</button>
+            <button id="clearPattern">Clear Pattern</button>
+        </div>
+
         <div class="controls">
             <button id="chirp">Chirp</button>
             <button id="whistle">Whistle</button>
