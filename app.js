@@ -12,6 +12,7 @@ class BirdSynth {
         this.recordingStartTime = 0;
         this.recordingEvents = [];
         this.currentPlayback = null;
+        this.activeOscillators = new Set();
         
         this.setupCanvas();
         this.setupControls();
@@ -121,6 +122,37 @@ class BirdSynth {
         this.recordingList.appendChild(recordingItem);
     }
 
+    createOscillator() {
+        const oscillator = this.audioContext.createOscillator();
+        const modulator = this.audioContext.createOscillator();
+        const gainNode = this.audioContext.createGain();
+        const modGain = this.audioContext.createGain();
+
+        modulator.connect(modGain);
+        modGain.connect(oscillator.frequency);
+        oscillator.connect(gainNode);
+        gainNode.connect(this.analyser);
+
+        oscillator.type = 'sine';
+        modulator.type = 'sine';
+
+        this.activeOscillators.add({ oscillator, modulator, gainNode, modGain });
+        return { oscillator, modulator, gainNode, modGain };
+    }
+
+    cleanupOscillators() {
+        this.activeOscillators.forEach(({ oscillator, modulator, gainNode }) => {
+            try {
+                oscillator.stop();
+                modulator.stop();
+                gainNode.disconnect();
+            } catch (e) {
+                console.log('Error cleaning up oscillators:', e);
+            }
+        });
+        this.activeOscillators.clear();
+    }
+
     playRecording(index = null) {
         if (this.isPlaying) return;
         
@@ -134,14 +166,19 @@ class BirdSynth {
         const startTime = this.audioContext.currentTime;
         
         recording.events.forEach(event => {
-            const time = startTime + event.time;
-            this.oscillator.frequency.setValueAtTime(event.frequency, time);
-            this.modulator.frequency.setValueAtTime(event.modulationFrequency, time);
-            this.modGain.gain.setValueAtTime(event.modulation, time);
+            const { oscillator, modulator, gainNode, modGain } = this.createOscillator();
             
-            this.gainNode.gain.setValueAtTime(0, time);
-            this.gainNode.gain.linearRampToValueAtTime(1, time + event.attack);
-            this.gainNode.gain.linearRampToValueAtTime(0, time + event.attack + event.release);
+            const time = startTime + event.time;
+            oscillator.frequency.setValueAtTime(event.frequency, time);
+            modulator.frequency.setValueAtTime(event.modulationFrequency, time);
+            modGain.gain.setValueAtTime(event.modulation, time);
+            
+            gainNode.gain.setValueAtTime(0, time);
+            gainNode.gain.linearRampToValueAtTime(1, time + event.attack);
+            gainNode.gain.linearRampToValueAtTime(0, time + event.attack + event.release);
+
+            oscillator.start(time);
+            modulator.start(time);
         });
 
         this.currentPlayback = setTimeout(() => {
@@ -163,7 +200,7 @@ class BirdSynth {
         this.isPlaying = false;
         this.playButton.classList.remove('playing');
         this.playButton.textContent = 'Play';
-        this.gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
+        this.cleanupOscillators();
     }
 
     clearRecordings() {
@@ -179,22 +216,24 @@ class BirdSynth {
         const release = parseFloat(this.sliders.release.value);
         const modulationFrequency = this.getModulationFrequency(type);
 
-        this.oscillator.frequency.setValueAtTime(frequency, this.audioContext.currentTime);
-        this.modulator.frequency.setValueAtTime(modulationFrequency, this.audioContext.currentTime);
-        this.modGain.gain.setValueAtTime(modulation, this.audioContext.currentTime);
+        const { oscillator, modulator, gainNode, modGain } = this.createOscillator();
 
-        this.gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
-        this.gainNode.gain.linearRampToValueAtTime(1, this.audioContext.currentTime + attack);
-        this.gainNode.gain.linearRampToValueAtTime(0, this.audioContext.currentTime + attack + release);
+        const time = this.audioContext.currentTime;
+        oscillator.frequency.setValueAtTime(frequency, time);
+        modulator.frequency.setValueAtTime(modulationFrequency, time);
+        modGain.gain.setValueAtTime(modulation, time);
 
-        this.oscillator.start();
-        this.modulator.start();
+        gainNode.gain.setValueAtTime(0, time);
+        gainNode.gain.linearRampToValueAtTime(1, time + attack);
+        gainNode.gain.linearRampToValueAtTime(0, time + attack + release);
+
+        oscillator.start(time);
+        modulator.start(time);
         this.visualize();
 
         if (this.isRecording) {
-            const time = this.audioContext.currentTime - this.recordingStartTime;
             this.recordingEvents.push({
-                time,
+                time: time - this.recordingStartTime,
                 frequency,
                 modulation,
                 modulationFrequency,
@@ -202,6 +241,18 @@ class BirdSynth {
                 release
             });
         }
+
+        // Clean up after sound is done playing
+        setTimeout(() => {
+            try {
+                oscillator.stop();
+                modulator.stop();
+                gainNode.disconnect();
+                this.activeOscillators.delete({ oscillator, modulator, gainNode, modGain });
+            } catch (e) {
+                console.log('Error cleaning up sound:', e);
+            }
+        }, (attack + release) * 1000);
     }
 
     stopSound() {
