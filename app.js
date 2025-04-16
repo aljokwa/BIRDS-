@@ -9,15 +9,24 @@ class BirdSynth {
         this.recordings = [];
         this.isRecording = false;
         this.isPlaying = false;
+        this.isLooping = false;
         this.recordingStartTime = 0;
         this.recordingEvents = [];
         this.currentPlayback = null;
         this.activeOscillators = new Set();
+        this.currentProgress = 0;
+        this.progressInterval = null;
+        
+        this.echoEnabled = false;
+        this.tapeEnabled = false;
+        this.tapeSpeed = 1;
+        this.tapeDirection = 1;
         
         this.setupCanvas();
         this.setupControls();
         this.setupAudioNodes();
         this.setupRecordingControls();
+        this.setupEffects();
     }
 
     setupCanvas() {
@@ -79,6 +88,136 @@ class BirdSynth {
         this.clearButton.addEventListener('click', () => this.clearRecordings());
     }
 
+    setupEffects() {
+        // Echo effect
+        this.echoDelay = this.audioContext.createDelay(1.0);
+        this.echoFeedback = this.audioContext.createGain();
+        this.echoWet = this.audioContext.createGain();
+        
+        this.echoDelay.delayTime.value = 0.3;
+        this.echoFeedback.gain.value = 0.5;
+        this.echoWet.gain.value = 0.5;
+
+        // Tape effect
+        this.tapeOscillator = this.audioContext.createOscillator();
+        this.tapeGain = this.audioContext.createGain();
+        this.tapeOscillator.frequency.value = 0.1;
+        this.tapeGain.gain.value = 0.1;
+        this.tapeOscillator.start();
+
+        // Connect effects
+        this.echoDelay.connect(this.echoFeedback);
+        this.echoFeedback.connect(this.echoDelay);
+        this.echoDelay.connect(this.echoWet);
+        this.echoWet.connect(this.analyser);
+
+        this.tapeOscillator.connect(this.tapeGain);
+        this.tapeGain.connect(this.analyser);
+
+        // Setup effect controls
+        this.setupEffectControls();
+    }
+
+    setupEffectControls() {
+        // Echo controls
+        const echoEnabled = document.getElementById('echoEnabled');
+        const echoDelay = document.getElementById('echoDelay');
+        const echoFeedback = document.getElementById('echoFeedback');
+        const echoDelayValue = document.getElementById('echoDelayValue');
+        const echoFeedbackValue = document.getElementById('echoFeedbackValue');
+
+        echoEnabled.addEventListener('change', (e) => {
+            this.echoEnabled = e.target.checked;
+            this.updateEffectRouting();
+        });
+
+        echoDelay.addEventListener('input', (e) => {
+            const value = parseFloat(e.target.value);
+            this.echoDelay.delayTime.value = value;
+            echoDelayValue.textContent = `${value.toFixed(1)}s`;
+        });
+
+        echoFeedback.addEventListener('input', (e) => {
+            const value = parseFloat(e.target.value);
+            this.echoFeedback.gain.value = value;
+            echoFeedbackValue.textContent = value.toFixed(1);
+        });
+
+        // Tape controls
+        const tapeEnabled = document.getElementById('tapeEnabled');
+        const wow = document.getElementById('wow');
+        const flutter = document.getElementById('flutter');
+        const wowValue = document.getElementById('wowValue');
+        const flutterValue = document.getElementById('flutterValue');
+        const tapePlay = document.getElementById('tapePlay');
+        const tapeReverse = document.getElementById('tapeReverse');
+        const tapeSlow = document.getElementById('tapeSlow');
+        const tapeFast = document.getElementById('tapeFast');
+
+        tapeEnabled.addEventListener('change', (e) => {
+            this.tapeEnabled = e.target.checked;
+            this.updateEffectRouting();
+        });
+
+        wow.addEventListener('input', (e) => {
+            const value = parseFloat(e.target.value);
+            this.tapeOscillator.frequency.value = value * 0.2;
+            wowValue.textContent = value.toFixed(1);
+        });
+
+        flutter.addEventListener('input', (e) => {
+            const value = parseFloat(e.target.value);
+            this.tapeGain.gain.value = value * 0.2;
+            flutterValue.textContent = value.toFixed(1);
+        });
+
+        tapePlay.addEventListener('click', () => {
+            this.tapeSpeed = 1;
+            this.tapeDirection = 1;
+            this.updateTapeControls();
+        });
+
+        tapeReverse.addEventListener('click', () => {
+            this.tapeDirection = -1;
+            this.updateTapeControls();
+        });
+
+        tapeSlow.addEventListener('click', () => {
+            this.tapeSpeed = 0.5;
+            this.updateTapeControls();
+        });
+
+        tapeFast.addEventListener('click', () => {
+            this.tapeSpeed = 2;
+            this.updateTapeControls();
+        });
+    }
+
+    updateTapeControls() {
+        const buttons = ['tapePlay', 'tapeReverse', 'tapeSlow', 'tapeFast'];
+        buttons.forEach(id => {
+            const button = document.getElementById(id);
+            button.classList.remove('active');
+        });
+
+        if (this.tapeDirection === -1) {
+            document.getElementById('tapeReverse').classList.add('active');
+        } else {
+            if (this.tapeSpeed === 0.5) {
+                document.getElementById('tapeSlow').classList.add('active');
+            } else if (this.tapeSpeed === 2) {
+                document.getElementById('tapeFast').classList.add('active');
+            } else {
+                document.getElementById('tapePlay').classList.add('active');
+            }
+        }
+    }
+
+    updateEffectRouting() {
+        this.cleanupOscillators();
+        this.setupAudioNodes();
+    }
+
     startRecording() {
         if (!this.isRecording) {
             this.isRecording = true;
@@ -110,16 +249,132 @@ class BirdSynth {
         const recordingItem = document.createElement('div');
         recordingItem.className = 'recording-item';
         
+        const header = document.createElement('div');
+        header.className = 'recording-header';
+        
         const recordingInfo = document.createElement('span');
         recordingInfo.textContent = `Recording ${this.recordings.length} (${recording.duration.toFixed(2)}s)`;
+        
+        const controls = document.createElement('div');
+        controls.className = 'recording-controls';
         
         const playButton = document.createElement('button');
         playButton.textContent = 'Play';
         playButton.addEventListener('click', () => this.playRecording(this.recordings.length - 1));
         
-        recordingItem.appendChild(recordingInfo);
-        recordingItem.appendChild(playButton);
+        const loopCheckbox = document.createElement('input');
+        loopCheckbox.type = 'checkbox';
+        loopCheckbox.id = `loop-${this.recordings.length - 1}`;
+        loopCheckbox.addEventListener('change', (e) => {
+            this.isLooping = e.target.checked;
+            if (this.isPlaying) {
+                this.stopPlayback();
+                this.playRecording(this.recordings.length - 1);
+            }
+        });
+        
+        const loopLabel = document.createElement('label');
+        loopLabel.htmlFor = `loop-${this.recordings.length - 1}`;
+        loopLabel.textContent = 'Loop';
+        
+        const loopControls = document.createElement('div');
+        loopControls.className = 'loop-controls';
+        loopControls.appendChild(loopCheckbox);
+        loopControls.appendChild(loopLabel);
+        
+        controls.appendChild(playButton);
+        controls.appendChild(loopControls);
+        
+        header.appendChild(recordingInfo);
+        header.appendChild(controls);
+        
+        const soundEvents = document.createElement('div');
+        soundEvents.className = 'sound-events';
+        
+        recording.events.forEach((event, index) => {
+            const soundEvent = this.createSoundEventUI(event, index, this.recordings.length - 1);
+            soundEvents.appendChild(soundEvent);
+        });
+        
+        recordingItem.appendChild(header);
+        recordingItem.appendChild(soundEvents);
         this.recordingList.appendChild(recordingItem);
+    }
+
+    createSoundEventUI(event, index, recordingIndex) {
+        const soundEvent = document.createElement('div');
+        soundEvent.className = 'sound-event';
+        
+        const typeSelect = document.createElement('select');
+        ['chirp', 'whistle', 'trill', 'warble'].forEach(type => {
+            const option = document.createElement('option');
+            option.value = type;
+            option.textContent = type;
+            typeSelect.appendChild(option);
+        });
+        
+        const frequencySlider = document.createElement('input');
+        frequencySlider.type = 'range';
+        frequencySlider.min = '200';
+        frequencySlider.max = '2000';
+        frequencySlider.value = event.frequency;
+        
+        const modulationSlider = document.createElement('input');
+        modulationSlider.type = 'range';
+        modulationSlider.min = '0';
+        modulationSlider.max = '100';
+        modulationSlider.value = event.modulation;
+        
+        const deleteButton = document.createElement('button');
+        deleteButton.textContent = '×';
+        deleteButton.addEventListener('click', () => {
+            this.recordings[recordingIndex].events.splice(index, 1);
+            soundEvent.remove();
+            this.updateRecordingDuration(recordingIndex);
+        });
+        
+        const updateEvent = () => {
+            this.recordings[recordingIndex].events[index] = {
+                ...event,
+                type: typeSelect.value,
+                frequency: parseFloat(frequencySlider.value),
+                modulation: parseFloat(modulationSlider.value),
+                modulationFrequency: this.getModulationFrequency(typeSelect.value)
+            };
+        };
+        
+        typeSelect.addEventListener('change', updateEvent);
+        frequencySlider.addEventListener('input', updateEvent);
+        modulationSlider.addEventListener('input', updateEvent);
+        
+        soundEvent.appendChild(typeSelect);
+        soundEvent.appendChild(frequencySlider);
+        soundEvent.appendChild(modulationSlider);
+        soundEvent.appendChild(deleteButton);
+        
+        return soundEvent;
+    }
+
+    updateRecordingDuration(recordingIndex) {
+        const recording = this.recordings[recordingIndex];
+        if (recording.events.length === 0) {
+            recording.duration = 0;
+        } else {
+            const lastEvent = recording.events[recording.events.length - 1];
+            recording.duration = lastEvent.time + lastEvent.attack + lastEvent.release;
+        }
+        this.updateRecordingInfo(recordingIndex);
+    }
+
+    updateRecordingInfo(recordingIndex) {
+        const recordingItem = this.recordingList.children[recordingIndex];
+        const infoSpan = recordingItem.querySelector('.recording-header span');
+        infoSpan.textContent = `Recording ${recordingIndex + 1} (${this.recordings[recordingIndex].duration.toFixed(2)}s)`;
+    }
+
+    updateProgressBar(progress) {
+        const progressBar = document.getElementById('progressBar');
+        progressBar.style.width = `${progress * 100}%`;
     }
 
     createOscillator() {
@@ -131,7 +386,16 @@ class BirdSynth {
         modulator.connect(modGain);
         modGain.connect(oscillator.frequency);
         oscillator.connect(gainNode);
-        gainNode.connect(this.analyser);
+
+        if (this.echoEnabled) {
+            gainNode.connect(this.echoDelay);
+            gainNode.connect(this.analyser);
+        } else if (this.tapeEnabled) {
+            gainNode.connect(this.tapeGain);
+            gainNode.connect(this.analyser);
+        } else {
+            gainNode.connect(this.analyser);
+        }
 
         oscillator.type = 'sine';
         modulator.type = 'sine';
@@ -162,28 +426,51 @@ class BirdSynth {
         this.isPlaying = true;
         this.playButton.classList.add('playing');
         this.playButton.textContent = 'Playing...';
+        this.currentProgress = 0;
+        this.updateProgressBar(0);
 
-        const startTime = this.audioContext.currentTime;
-        
-        recording.events.forEach(event => {
-            const { oscillator, modulator, gainNode, modGain } = this.createOscillator();
+        const playLoop = () => {
+            const startTime = this.audioContext.currentTime;
             
-            const time = startTime + event.time;
-            oscillator.frequency.setValueAtTime(event.frequency, time);
-            modulator.frequency.setValueAtTime(event.modulationFrequency, time);
-            modGain.gain.setValueAtTime(event.modulation, time);
-            
-            gainNode.gain.setValueAtTime(0, time);
-            gainNode.gain.linearRampToValueAtTime(1, time + event.attack);
-            gainNode.gain.linearRampToValueAtTime(0, time + event.attack + event.release);
+            recording.events.forEach(event => {
+                const { oscillator, modulator, gainNode, modGain } = this.createOscillator();
+                
+                const time = startTime + (event.time * this.tapeDirection / this.tapeSpeed);
+                oscillator.frequency.setValueAtTime(event.frequency, time);
+                modulator.frequency.setValueAtTime(event.modulationFrequency, time);
+                modGain.gain.setValueAtTime(event.modulation, time);
+                
+                gainNode.gain.setValueAtTime(0, time);
+                gainNode.gain.linearRampToValueAtTime(1, time + event.attack);
+                gainNode.gain.linearRampToValueAtTime(0, time + event.attack + event.release);
 
-            oscillator.start(time);
-            modulator.start(time);
-        });
+                oscillator.start(time);
+                modulator.start(time);
+            });
 
-        this.currentPlayback = setTimeout(() => {
-            this.stopPlayback();
-        }, (recording.duration + 1) * 1000);
+            this.progressInterval = setInterval(() => {
+                this.currentProgress += (0.1 * this.tapeDirection) / (recording.duration * this.tapeSpeed);
+                if (this.currentProgress >= 1 || this.currentProgress <= 0) {
+                    if (!this.isLooping) {
+                        this.stopPlayback();
+                        return;
+                    }
+                    this.currentProgress = this.tapeDirection === 1 ? 0 : 1;
+                }
+                this.updateProgressBar(this.currentProgress);
+            }, 100);
+
+            this.currentPlayback = setTimeout(() => {
+                this.cleanupOscillators();
+                if (this.isLooping) {
+                    playLoop();
+                } else {
+                    this.stopPlayback();
+                }
+            }, (recording.duration / this.tapeSpeed + 1) * 1000);
+        };
+
+        playLoop();
     }
 
     pausePlayback() {
@@ -197,9 +484,15 @@ class BirdSynth {
             clearTimeout(this.currentPlayback);
             this.currentPlayback = null;
         }
+        if (this.progressInterval) {
+            clearInterval(this.progressInterval);
+            this.progressInterval = null;
+        }
         this.isPlaying = false;
         this.playButton.classList.remove('playing');
         this.playButton.textContent = 'Play';
+        this.currentProgress = 0;
+        this.updateProgressBar(0);
         this.cleanupOscillators();
     }
 
